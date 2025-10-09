@@ -2,8 +2,8 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:screen_capture_event/screen_capture_event.dart';
 
 class RecordScreen extends StatefulWidget {
   const RecordScreen({super.key});
@@ -13,19 +13,39 @@ class RecordScreen extends StatefulWidget {
 }
 
 class _RecordScreenState extends State<RecordScreen> {
+  final ScreenCaptureEvent screenListener = ScreenCaptureEvent();
   CameraController? _controller;
   bool isRecording = false;
   String testName = '';
-  int duration = 1; // minutos
+  int duration = 2; // minutos
   int interval = 1; // minutos
   String? videoPath;
   String? folderPath;
   Timer? _snapshotTimer;
+  String screenEventText = '';
 
   @override
   void initState() {
     super.initState();
     _initializeCamera();
+
+    screenListener.addScreenRecordListener((recorded) {
+      setState(() {
+        screenEventText = recorded
+            ? "🟥 Gravação de tela iniciada"
+            : "⬛ Gravação de tela encerrada";
+      });
+      debugPrint(screenEventText);
+    });
+
+    screenListener.addScreenShotListener((filePath) {
+      setState(() {
+        screenEventText = "📸 Screenshot salva em: $filePath";
+      });
+      debugPrint(screenEventText);
+    });
+
+    screenListener.watch();
   }
 
   Future<void> _initializeCamera() async {
@@ -34,6 +54,7 @@ class _RecordScreenState extends State<RecordScreen> {
     final storageStatus = await Permission.manageExternalStorage.request();
 
     if (!cameraStatus.isGranted || !micStatus.isGranted || !storageStatus.isGranted) {
+      debugPrint("❌ Permissões não concedidas");
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Permissões necessárias não concedidas")),
@@ -63,51 +84,62 @@ class _RecordScreenState extends State<RecordScreen> {
     }
   }
 
-  Future<String> _createTestFolder(String name) async {
-    final baseDir = await getExternalStorageDirectory();
-    final folderName =
-        '${DateTime.now().toIso8601String().replaceAll(":", "").replaceAll("-", "").split(".").first}_$name';
-    final folder = Directory('${baseDir!.path}/ChronoTest/$folderName');
-    if (!await folder.exists()) await folder.create(recursive: true);
-    return folder.path;
+  Future<String> _createChronoTestFolder(String name) async {
+    final baseFolder = Directory('/storage/emulated/0/DCIM/ChronoTest');
+    if (!await baseFolder.exists()) await baseFolder.create(recursive: true);
+
+    final testFolderName = '${DateTime.now().toIso8601String().replaceAll(":", "").replaceAll("-", "").split(".").first}_$name';
+    final testFolder = Directory('${baseFolder.path}/$testFolderName');
+    if (!await testFolder.exists()) await testFolder.create(recursive: true);
+
+    return testFolder.path;
   }
 
   void _startRecording() async {
-    if (_controller == null || !_controller!.value.isInitialized || _controller!.value.isRecordingVideo) {
-      debugPrint("❌ Câmera não está pronta ou já está gravando");
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Câmera não está pronta ou já está gravando")),
-      );
-      return;
-    }
+  debugPrint("🎬 Botão de gravação pressionado");
 
-    folderPath = await _createTestFolder(testName);
-    videoPath = '$folderPath/video.mp4';
-
-    try {
-      debugPrint("🎥 Iniciando gravação...");
-      await Future.delayed(const Duration(milliseconds: 500));
-      await _controller!.startVideoRecording();
-      debugPrint("✅ Gravação iniciada");
-
-      isRecording = true;
-      if (!mounted) return;
-      setState(() {});
-
-      _startSnapshotTimer();
-
-      Future.delayed(Duration(minutes: duration), () {
-        if (isRecording) _stopRecording();
-      });
-    } catch (e) {
-      debugPrint("❌ Erro ao iniciar gravação: $e");
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Falha ao iniciar gravação")),
-      );
-    }
+  if (interval <= 0) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Intervalo entre fotos deve ser maior que 0 minuto")),
+    );
+    debugPrint("⚠️ Intervalo inválido: $interval");
+    return;
   }
+
+  if (_controller == null || !_controller!.value.isInitialized) {
+    debugPrint("❌ Câmera não está pronta");
+    return;
+  }
+
+  if (_controller!.value.isRecordingVideo) {
+    debugPrint("⚠️ Já está gravando");
+    return;
+  }
+
+  folderPath = await _createChronoTestFolder(testName);
+  videoPath = '$folderPath/video.mp4';
+
+  try {
+    debugPrint("🎥 Iniciando gravação...");
+    await Future.delayed(const Duration(milliseconds: 500));
+    await _controller!.startVideoRecording();
+    debugPrint("✅ Gravação iniciada");
+
+    isRecording = true;
+    setState(() {});
+    _startSnapshotTimer();
+
+    Future.delayed(Duration(minutes: duration), () {
+      if (isRecording) _stopRecording();
+    });
+  } catch (e) {
+    debugPrint("❌ Erro ao iniciar gravação: $e");
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Falha ao iniciar gravação")),
+    );
+  }
+}
 
   void _startSnapshotTimer() {
     _snapshotTimer = Timer.periodic(Duration(minutes: interval), (timer) async {
@@ -143,7 +175,6 @@ class _RecordScreenState extends State<RecordScreen> {
 
       isRecording = false;
       _snapshotTimer?.cancel();
-      if (!mounted) return;
       setState(() {});
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -164,6 +195,7 @@ class _RecordScreenState extends State<RecordScreen> {
   void dispose() {
     _snapshotTimer?.cancel();
     _controller?.dispose();
+    screenListener.dispose();
     super.dispose();
   }
 
@@ -196,7 +228,7 @@ class _RecordScreenState extends State<RecordScreen> {
                 TextField(
                   enabled: !isRecording,
                   keyboardType: TextInputType.number,
-                  onChanged: (v) => duration = int.tryParse(v) ?? 1,
+                  onChanged: (v) => duration = int.tryParse(v) ?? 2,
                   decoration: const InputDecoration(
                     labelText: "Duração do vídeo (minutos)",
                     border: OutlineInputBorder(),
@@ -221,6 +253,14 @@ class _RecordScreenState extends State<RecordScreen> {
                     minimumSize: const Size(double.infinity, 50),
                   ),
                 ),
+                if (screenEventText.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: Text(
+                      screenEventText,
+                      style: const TextStyle(fontSize: 14, color: Colors.blueAccent),
+                    ),
+                  ),
               ],
             ),
           ),
