@@ -1,8 +1,9 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
-import 'video_view_screen.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'video_view_screen.dart';
+import '../l10n/app_localizations.dart'; // ✅ Importação do sistema de tradução
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -28,8 +29,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
     } else {
       debugPrint("❌ Permissão de armazenamento negada");
       if (mounted) {
+        final loc = AppLocalizations.of(context)!;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Permissão de armazenamento é necessária")),
+          SnackBar(content: Text(loc.storagePermissionRequired)),
         );
       }
     }
@@ -43,11 +45,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
 
     final folders = baseDir.listSync().whereType<Directory>().toList();
-    debugPrint("📁 Pastas encontradas:");
-    for (var folder in folders) {
-      debugPrint("➡️ ${folder.path}");
-    }
-
     for (var folder in folders) {
       try {
         final folderName = folder.path.split('/').last;
@@ -59,7 +56,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
         if (parts.length >= 2) {
           final dateStr = parts[0];
           final fullDate = _parseFolderDate(dateStr);
-          date = DateTime(fullDate.year, fullDate.month, fullDate.day); // remove hora
+          date = DateTime(fullDate.year, fullDate.month, fullDate.day);
           testName = parts.sublist(1).join('_');
         } else {
           final fallbackDate = folder.statSync().modified;
@@ -73,18 +70,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
             .where((f) => f.path.endsWith('.mp4') || f.path.endsWith('.jpg'))
             .toList();
 
-        debugPrint("📂 Arquivos em ${folder.path}:");
-        for (var file in files) {
-          debugPrint("   📄 ${file.path}");
-        }
-
         files.sort((a, b) => a.path.compareTo(b.path));
 
         if (files.isNotEmpty) {
           testsByDateAndName.putIfAbsent(date, () => {});
           testsByDateAndName[date]!.update(testName, (existing) => [...existing, ...files],
               ifAbsent: () => files);
-          debugPrint("✅ Teste registrado: $testName em $date com ${files.length} arquivos");
         }
       } catch (e) {
         debugPrint("❌ Erro ao processar pasta: ${folder.path}");
@@ -105,23 +96,22 @@ class _HistoryScreenState extends State<HistoryScreen> {
       final second = int.parse(cleaned.substring(12, 14));
       return DateTime(year, month, day, hour, minute, second);
     } catch (e) {
-      debugPrint("❌ Erro ao converter data da pasta: $raw");
-      return DateTime.now(); // fallback
+      return DateTime.now();
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final loc = AppLocalizations.of(context)!;
     final normalizedDay = DateTime(selectedDay.year, selectedDay.month, selectedDay.day);
     final testsForDay = testsByDateAndName[normalizedDay] ?? {};
-    debugPrint("📅 Dia selecionado: $normalizedDay");
-    debugPrint("📊 Testes encontrados: ${testsForDay.length}");
 
     return Scaffold(
-      appBar: AppBar(title: const Text("Histórico")),
+      appBar: AppBar(title: Text(loc.history)),
       body: Column(
         children: [
           TableCalendar(
+            locale: loc.localeName, // ✅ idioma do calendário
             firstDay: DateTime(2020),
             lastDay: DateTime(2030),
             focusedDay: selectedDay,
@@ -134,7 +124,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
           ),
           Expanded(
             child: testsForDay.isEmpty
-                ? const Center(child: Text("Nenhum teste encontrado para este dia"))
+                ? Center(child: Text(loc.noTestsFound))
                 : ListView(
                     children: testsForDay.entries.map((entry) {
                       final testName = entry.key;
